@@ -1,0 +1,5 @@
+.cache
+.vscode
+*~
+*.swp
+build/
