@@ -161,7 +161,7 @@ double test_elemwise_op(Device* device, CommandQueue& cq, long program_latency)
     );
     KernelHandle compute = CreateKernel(
         program,
-        "ttpeak_kernels/compute/vecadd.cpp",
+        "ttpeak_kernels/compute/unary.cpp",
         core,
         ComputeConfig{
             .math_approx_mode = false,
