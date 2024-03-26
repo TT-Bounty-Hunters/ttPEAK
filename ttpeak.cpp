@@ -1,10 +1,12 @@
 
 #include "common/core_coord.h"
+#include "common/logger.hpp"
 #include "tt_metal/host_api.hpp"
 #include "common/bfloat16.hpp"
 #include <cstdint>
 #include <memory>
 #include <chrono>
+#include <string_view>
 #include <vector>
 #include <cmath>
 
@@ -103,9 +105,11 @@ double test_dram_read(Device* device, CommandQueue& cq, long program_latency, si
     Program program = CreateProgram();
 
     // Don't care about the contents of the buffer. We just want to measure the bandwidth
-    auto dram_buffer = MakeBufferBFP16(device, 512, false);
-    auto l1_buffer = MakeBufferBFP16(device, 64, true);
-    const size_t core_grid_width = device->logical_grid_size().x;
+    // Each tile is 2 * (32 * 32) = 2 KiB. 1K tiles = 2 MiB
+    auto dram_buffer = MakeBufferBFP16(device, 8 * 1024, false);
+    auto l1_buffer = MakeBufferBFP16(device, 32, true);
+    const size_t core_grid_width = device->compute_with_storage_grid_size().x;
+    const size_t data_size = dram_buffer->size();
 
     for(size_t i = 0; i < n_cores; i++)
     {
@@ -144,7 +148,7 @@ double test_dram_read(Device* device, CommandQueue& cq, long program_latency, si
     }
 
     auto real_duration = geometric_mean(runtimes) - program_latency;
-    double bandwidth_gbs = (double)dram_buffer->size() / real_duration * n_cores;
+    double bandwidth_gbs = (double)data_size / real_duration * n_cores;
 
     return bandwidth_gbs;
 }
@@ -161,7 +165,7 @@ double test_elemwise_op(Device* device, CommandQueue& cq, long program_latency)
     );
     KernelHandle compute = CreateKernel(
         program,
-        "ttpeak_kernels/compute/unary.cpp",
+        "ttpeak_kernels/compute/dummy_unary_op.cpp",
         core,
         ComputeConfig{
             .math_approx_mode = false,
@@ -243,12 +247,14 @@ std::string arch2name(tt::ARCH arch)
 void print_device_info(Device* device)
 {
     CoreCoord core_grid = device->logical_grid_size();
+    CoreCoord compute_with_storage_grid_size = device->compute_with_storage_grid_size();
     std::cout << "Device info:\n"
         << "  Architecture: " << arch2name(device->arch()) << "\n"
         << "  Device ID: " << device->id() << "\n"
         << "  # of hardware command queues: " << (int)device->num_hw_cqs() << "\n"
         << "  L1 memory per core: " << device->l1_size_per_core() / 1024 << " KiB\n"
         << "  Logical core grid size: " << core_grid.x << "x" << core_grid.y << "\n"
+        << "  Compute with storage grid size: " << compute_with_storage_grid_size.x << "x" << compute_with_storage_grid_size.y << "\n"
         << "  DRAM banks: " << device->num_banks(BufferType::DRAM) << "\n"
         << "  DRAM bank size: " << device->bank_size(BufferType::DRAM) / 1024 / 1024 << " MiB\n"
         << "  DRAM channels: " << device->num_dram_channels() << "\n"
@@ -257,22 +263,56 @@ void print_device_info(Device* device)
         << std::endl;
 }
 
+void help(std::string_view arg0)
+{
+    std::cout << "Usage: " << arg0 << " [-d <device_id>]\n"
+        << "  -d <device_id>  Device ID to run the test on\n"
+        << std::endl;
+}
+
+std::string next_arg(int& i, int argc, char** argv)
+{
+    if(i + 1 >= argc)
+        throw std::runtime_error("Expected argument after " + std::string(argv[i]));
+    return argv[++i];
+}
 
 int main(int argc, char **argv)
 {
     int device_id = 0;
+    for(int i = 1; i < argc; i++)
+    {
+        std::string_view arg = argv[i];
+        if(arg == "-d")
+            device_id = std::stoi(next_arg(i, argc, argv));
+        else if(arg == "-h" || arg == "--help") {
+            help(argv[0]);
+            return 0;
+        }
+        else {
+            std::cerr << "Unknown argument: " << arg << std::endl;
+            help(argv[0]);
+            return 1;
+        
+        }
+
+    }
+
     Device *device = CreateDevice(device_id);
     print_device_info(device);
 
     CommandQueue& cq = device->command_queue();
 
+    auto core_grid = device->compute_with_storage_grid_size();
+
     std::cout << "DRAM Bandwidth:" << std::endl;
     size_t program_run_ns = test_program_run_latency(device, cq);
     double dram_gbs = test_dram_read(device, cq, program_run_ns, 1);
     std::cout << "  DRAM read bandwidth (1 core): " << dram_gbs << " GB/s" << std::endl;
-    double dram_gbs_8 = test_dram_read(device, cq, program_run_ns, 8);
-    std::cout << "  DRAM read bandwidth (8 cores): " << dram_gbs_8 << " GB/s" << std::endl;
+    double dram_gbs_all = test_dram_read(device, cq, program_run_ns, core_grid.x * core_grid.y);
+    std::cout << "  DRAM read bandwidth (all cores): " << dram_gbs_all << " GB/s" << std::endl;
 
+    std::cout << "\n";
     std::cout << "Compute: " << std::endl;
     double elemwise_glfops = test_elemwise_op(device, cq, program_run_ns);
     std::cout << "  Elementwise operation: " << elemwise_glfops << " GLFLOPS" << std::endl;
@@ -284,7 +324,7 @@ int main(int argc, char **argv)
         << "  Upload: " << upload_gbs << " GB/s\n";
     
     std::cout << "\n";
-    std::cout << "Empty program latency: " << program_run_ns << " ns" << std::endl;
+    std::cout << "Empty program latency: " << 0 << " ns" << std::endl;
     CloseDevice(device);
 
     return 0;

@@ -13,9 +13,23 @@ void kernel_main()
     if(l1_size == 0)
         return;
 
-    for(uint32_t i = 0; i < dram_size; i += l1_size) {
-        std::uint64_t dram_buffer_src_noc_addr = get_noc_addr(dram_noc_x, dram_noc_y, dram_addr + i);
-        noc_async_read(dram_buffer_src_noc_addr, l1_addr, std::min(l1_size, dram_size - i));
+    const uint32_t tile_size_bytes = 32 * 32 * 2;
+
+    const InterleavedAddrGenFast<true> s = {
+        .bank_base_address = dram_addr,
+        .page_size = tile_size_bytes,
+        .data_format = DataFormat::Float16_b,
+    };
+
+    uint32_t dram_tiles = dram_size / tile_size_bytes;
+    uint32_t l1_tiles = l1_size / tile_size_bytes;
+
+    for(uint32_t i = 0; i < dram_tiles; i += l1_tiles) {
+
+        for(uint32_t j = 0; j < l1_tiles; j += 1) {
+            uint32_t read_to = l1_addr + j * tile_size_bytes;
+            noc_async_read_tile(i+j, s, read_to);
+        }
         noc_async_read_barrier();
     } 
 }
