@@ -1,8 +1,13 @@
 
 #include "common/core_coord.h"
 #include "common/logger.hpp"
+#include "common/tt_backend_api_types.hpp"
+#include "impl/buffers/circular_buffer_types.hpp"
+#include "impl/kernels/kernel_types.hpp"
+#include "impl/program/program.hpp"
 #include "tt_metal/host_api.hpp"
 #include "common/bfloat16.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <chrono>
@@ -63,6 +68,24 @@ std::shared_ptr<Buffer> MakeBufferBFP16(Device *device, uint32_t n_tiles, bool s
     constexpr uint32_t tile_size = 2 * (32 * 32);
     const uint32_t page_tiles = sram ? n_tiles : 1;
     return MakeBuffer(device, tile_size * n_tiles, page_tiles * tile_size, sram);
+}
+
+CBHandle MakeCircularBuffer(Program& program, const CoreCoord& core, tt::CB cb, uint32_t size, uint32_t page_size, tt::DataFormat format)
+{
+    CircularBufferConfig cb_src0_config = CircularBufferConfig(
+        size,
+        {{
+            cb,
+            tt::DataFormat::Float16_b
+    }})
+    .set_page_size(cb, page_size);
+    return CreateCircularBuffer(program, core, cb_src0_config);
+}
+
+CBHandle MakeCircularBufferBFP16(Program& program, const CoreCoord& core, tt::CB cb, uint32_t n_tiles)
+{
+    constexpr uint32_t tile_size = 2 * (32 * 32);
+    return MakeCircularBuffer(program, core, cb, n_tiles * tile_size, tile_size, tt::DataFormat::Float16_b);
 }
 
 size_t test_program_run_latency(Device* device, CommandQueue& cq)
@@ -153,6 +176,55 @@ double test_dram_read(Device* device, CommandQueue& cq, long program_latency, si
     return bandwidth_gbs;
 }
 
+double test_noc_bandwidth(Device* device, CommandQueue& cq, long program_latency, bool read)
+{
+    Program program = CreateProgram();
+    constexpr CoreCoord src_core = {0, 0};
+    constexpr CoreCoord dst_core = {1, 0};
+    KernelHandle writer = CreateKernel(
+        program,
+        read ? "ttpeak_kernels/movement/noc_reader.cpp" : "ttpeak_kernels/movement/noc_writer.cpp",
+        src_core,
+        DataMovementConfig{.processor = DataMovementProcessor::RISCV_0, .noc = NOC::RISCV_0_default}
+    );
+
+    const uint32_t n_tiles_per_transfer = 32;
+    const uint32_t n_transfer = 128;
+    const uint32_t tile_size_bytes = 2 * 32 * 32;
+    auto cb_src0 = MakeCircularBufferBFP16(program, src_core, tt::CB::c_in0, n_tiles_per_transfer);
+    auto cb_src1 = MakeCircularBufferBFP16(program, dst_core, tt::CB::c_in1, n_tiles_per_transfer);
+
+    CoreCoord dst_core_coord = device->worker_core_from_logical_core(dst_core);
+
+    SetRuntimeArgs(program, writer, src_core, {
+        L1_UNRESERVED_BASE + n_tiles_per_transfer * tile_size_bytes, // You gotta be kidding me. Manual address calculation?
+        (uint32_t)dst_core_coord.x,
+        (uint32_t)dst_core_coord.y,
+        n_tiles_per_transfer,
+        n_transfer
+    });
+
+    EnqueueProgram(cq, program, false);
+    Finish(cq);
+    
+    std::vector<double> runtimes;
+    for(size_t i = 0; i < experiment_runs; i++)
+    {
+        auto t1 = high_resolution_clock::now();
+        EnqueueProgram(cq, program, false);
+        Finish(cq);
+        auto t2 = high_resolution_clock::now();
+        auto duration = duration_cast<nanoseconds>(t2 - t1).count();
+        runtimes.push_back(duration);
+    }
+
+    auto real_duration = geometric_mean(runtimes) - program_latency;
+    size_t transtered_size = n_transfer * n_tiles_per_transfer * tile_size_bytes;
+    double bandwidth_gbs = (double)transtered_size / real_duration;
+
+    return bandwidth_gbs;
+}
+
 double test_elemwise_op(Device* device, CommandQueue& cq, long program_latency)
 {
     Program program = CreateProgram();
@@ -177,8 +249,7 @@ double test_elemwise_op(Device* device, CommandQueue& cq, long program_latency)
     constexpr uint32_t n_tiles = 2048;
     constexpr uint32_t single_tile_size = 32 * 32 * 2;
     constexpr uint32_t cb_tiles = 4;
-    CircularBufferConfig cb_src0_config = CircularBufferConfig(cb_tiles * single_tile_size, {{tt::CB::c_in0, tt::DataFormat::Float16_b}}).set_page_size(tt::CB::c_in0, single_tile_size);
-    CBHandle cb_src0 = CreateCircularBuffer(program, core, cb_src0_config);
+    CBHandle cb_src0 = MakeCircularBufferBFP16(program, core, tt::CB::c_in0, cb_tiles);
 
     SetRuntimeArgs(program, movement, core, {n_tiles});
     SetRuntimeArgs(program, compute, core, {n_tiles});
@@ -302,15 +373,18 @@ int main(int argc, char **argv)
     print_device_info(device);
 
     CommandQueue& cq = device->command_queue();
-
     auto core_grid = device->compute_with_storage_grid_size();
 
-    std::cout << "DRAM Bandwidth:" << std::endl;
+    std::cout << "Bandwidth:" << std::endl;
     size_t program_run_ns = test_program_run_latency(device, cq);
     double dram_gbs = test_dram_read(device, cq, program_run_ns, 1);
     std::cout << "  DRAM read bandwidth (1 core): " << dram_gbs << " GB/s" << std::endl;
     double dram_gbs_all = test_dram_read(device, cq, program_run_ns, core_grid.x * core_grid.y);
     std::cout << "  DRAM read bandwidth (all cores): " << dram_gbs_all << " GB/s" << std::endl;
+    double adjacent_write = test_noc_bandwidth(device, cq, program_run_ns, true);
+    std::cout << "  Adjacent core NoC write: " << adjacent_write << " GB/s" << std::endl;
+    double adjacent_read = test_noc_bandwidth(device, cq, program_run_ns, true);
+    std::cout << "  Adjacent core NoC read: " << adjacent_read << " GB/s" << std::endl;
 
     std::cout << "\n";
     std::cout << "Compute: " << std::endl;
