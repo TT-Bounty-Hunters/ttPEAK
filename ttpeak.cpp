@@ -11,12 +11,16 @@
 #include <cstdint>
 #include <memory>
 #include <chrono>
+#include <sstream>
 #include <string_view>
 #include <vector>
 #include <cmath>
+#include <iomanip>
 
 using namespace tt::tt_metal;
 using namespace chrono;
+
+using CoreSpec = const std::variant<CoreCoord, CoreRange, CoreRangeSet>;
 
 constexpr size_t experiment_runs = 6;
 
@@ -70,7 +74,7 @@ std::shared_ptr<Buffer> MakeBufferBFP16(Device *device, uint32_t n_tiles, bool s
     return MakeBuffer(device, tile_size * n_tiles, page_tiles * tile_size, sram);
 }
 
-CBHandle MakeCircularBuffer(Program& program, const CoreCoord& core, tt::CB cb, uint32_t size, uint32_t page_size, tt::DataFormat format)
+CBHandle MakeCircularBuffer(Program& program, const CoreSpec& core, tt::CB cb, uint32_t size, uint32_t page_size, tt::DataFormat format)
 {
     CircularBufferConfig cb_src0_config = CircularBufferConfig(
         size,
@@ -82,7 +86,7 @@ CBHandle MakeCircularBuffer(Program& program, const CoreCoord& core, tt::CB cb, 
     return CreateCircularBuffer(program, core, cb_src0_config);
 }
 
-CBHandle MakeCircularBufferBFP16(Program& program, const CoreCoord& core, tt::CB cb, uint32_t n_tiles)
+CBHandle MakeCircularBufferBFP16(Program& program, const CoreSpec& core, tt::CB cb, uint32_t n_tiles)
 {
     constexpr uint32_t tile_size = 2 * (32 * 32);
     return MakeCircularBuffer(program, core, cb, n_tiles * tile_size, tile_size, tt::DataFormat::Float16_b);
@@ -120,41 +124,33 @@ size_t test_program_run_latency(Device* device, CommandQueue& cq)
     return geometric_mean(runtimes);
 }
 
-double test_dram_read(Device* device, CommandQueue& cq, long program_latency, size_t n_cores)
+double test_dram_read(Device* device, CommandQueue& cq, long program_latency, CoreRange core = CoreCoord{0, 0})
 {
-    if(n_cores == 0)
-        throw std::runtime_error("Number of cores must be greater than 0");
-
     Program program = CreateProgram();
 
     // Don't care about the contents of the buffer. We just want to measure the bandwidth
     // Each tile is 2 * (32 * 32) = 2 KiB. 1K tiles = 2 MiB
     auto dram_buffer = MakeBufferBFP16(device, 8 * 1024, false);
     auto l1_buffer = MakeBufferBFP16(device, 32, true);
-    const size_t core_grid_width = device->compute_with_storage_grid_size().x;
     const size_t data_size = dram_buffer->size();
 
-    for(size_t i = 0; i < n_cores; i++)
-    {
-        CoreCoord core = {i % core_grid_width, i / core_grid_width};
-        KernelHandle kernel = CreateKernel(
-            program,
-            "ttpeak_kernels/movement/read_kernel.cpp",
-            core,
-            DataMovementConfig{.processor = DataMovementProcessor::RISCV_0, .noc = NOC::RISCV_0_default}
-        );
+    KernelHandle kernel = CreateKernel(
+        program,
+        "ttpeak_kernels/movement/read_kernel.cpp",
+        core,
+        DataMovementConfig{.processor = DataMovementProcessor::RISCV_0, .noc = NOC::RISCV_0_default}
+    );
 
-        const std::vector<uint32_t> runtime_args = {
-            l1_buffer->address(),
-            l1_buffer->size(),
-            dram_buffer->address(),
-            (uint32_t) dram_buffer->noc_coordinates().x,
-            (uint32_t) dram_buffer->noc_coordinates().y,
-            dram_buffer->size(),
-        };
+    const std::vector<uint32_t> runtime_args = {
+        l1_buffer->address(),
+        l1_buffer->size(),
+        dram_buffer->address(),
+        (uint32_t) dram_buffer->noc_coordinates().x,
+        (uint32_t) dram_buffer->noc_coordinates().y,
+        dram_buffer->size(),
+    };
 
-        SetRuntimeArgs(program, kernel, core, runtime_args);
-    }
+    SetRuntimeArgs(program, kernel, core, runtime_args);
 
     EnqueueProgram(cq, program, false);
     Finish(cq);
@@ -171,7 +167,7 @@ double test_dram_read(Device* device, CommandQueue& cq, long program_latency, si
     }
 
     auto real_duration = geometric_mean(runtimes) - program_latency;
-    double bandwidth_gbs = (double)data_size / real_duration * n_cores;
+    double bandwidth_gbs = (double)data_size / real_duration * core.size();
 
     return bandwidth_gbs;
 }
@@ -225,10 +221,9 @@ double test_noc_bandwidth(Device* device, CommandQueue& cq, long program_latency
     return bandwidth_gbs;
 }
 
-double test_matmul(Device* device, CommandQueue& cq, long program_latency)
+double test_matmul(Device* device, CommandQueue& cq, long program_latency, CoreRange core = CoreCoord{0, 0})
 {
     Program program = CreateProgram();
-    constexpr CoreCoord core = {0, 0};
     KernelHandle movement = CreateKernel(
         program,
         "ttpeak_kernels/movement/generate_dummy_interleaved.cpp",
@@ -270,16 +265,19 @@ double test_matmul(Device* device, CommandQueue& cq, long program_latency)
     }
     auto real_duration = geometric_mean(runtimes) - program_latency;
 
-    const size_t matmul_flop = n_tiles * 32 * 32 * (2 * 32 - 1);
+    const size_t matmul_flop = n_tiles * 32 * 32 * (2 * 32 - 1) * core.size();
     double gflops = (double)matmul_flop / (real_duration - program_latency);
     
     return gflops;
 }
 
-double test_element_wise(Device* device, CommandQueue& cq, long program_latency)
+double test_element_wise(Device* device, CommandQueue& cq, long program_latency, CoreRange core = CoreCoord{0, 0})
 {
     Program program = CreateProgram();
-    constexpr CoreCoord core = {0, 0};
+
+    auto core_grid = device->compute_with_storage_grid_size();
+    constexpr uint32_t n_tiles = 2048; // needs to be a multiple of 8
+    constexpr uint32_t cb_tiles = 16; // needs to be a multiple of 8
     KernelHandle movement = CreateKernel(
         program,
         "ttpeak_kernels/movement/generate_dummy_interleaved.cpp",
@@ -297,8 +295,6 @@ double test_element_wise(Device* device, CommandQueue& cq, long program_latency)
         }
     );
 
-    constexpr uint32_t n_tiles = 2048; // needs to be a multiple of 8
-    constexpr uint32_t cb_tiles = 16; // needs to be a multiple of 8
     CBHandle cb0 = MakeCircularBufferBFP16(program, core, tt::CB::c_in0, cb_tiles);
     CBHandle cb1 = MakeCircularBufferBFP16(program, core, tt::CB::c_in1, cb_tiles);
     CBHandle cb_out = MakeCircularBufferBFP16(program, core, tt::CB::c_out0, cb_tiles);
@@ -321,7 +317,7 @@ double test_element_wise(Device* device, CommandQueue& cq, long program_latency)
     }
     auto real_duration = geometric_mean(runtimes) - program_latency;
 
-    const size_t matmul_flop = n_tiles * 32 * 32;
+    const size_t matmul_flop = n_tiles * core.size() * 32 * 32;
     double gflops = (double)matmul_flop / (real_duration - program_latency);
     
     return gflops;
@@ -394,6 +390,8 @@ void print_device_info(Device* device)
 void help(std::string_view arg0)
 {
     std::cout << "Usage: " << arg0 << " [-d <device_id>]\n"
+        << "Synthetic benchmarking tool to measure peak capabilities of Tenstorrent devices.\n"
+        << "\n"
         << "  -d <device_id>  Device ID to run the test on\n"
         << std::endl;
 }
@@ -403,6 +401,19 @@ std::string next_arg(int& i, int argc, char** argv)
     if(i + 1 >= argc)
         throw std::runtime_error("Expected argument after " + std::string(argv[i]));
     return argv[++i];
+}
+
+std::string pretty_gflops(double gflops)
+{
+    std::stringstream ss;
+    ss << std::fixed << std::setprecision(3);
+    if(gflops < 1)
+        ss << gflops * 1000 << " MFLOPS";
+    else if (gflops > 1000)
+        ss << gflops / 1000 << " TFLOPS";
+    else
+        ss << gflops << " GFLOPS";
+    return ss.str();
 }
 
 int main(int argc, char **argv)
@@ -431,13 +442,13 @@ int main(int argc, char **argv)
 
     CommandQueue& cq = device->command_queue();
     auto core_grid = device->compute_with_storage_grid_size();
-    size_t n_cores = core_grid.x * core_grid.y;
+    auto all_cores = CoreRange(CoreCoord{0, 0}, CoreCoord{core_grid.x-1, core_grid.y-1});
 
     std::cout << "Bandwidth:" << std::endl;
     size_t program_run_ns = test_program_run_latency(device, cq);
-    double dram_gbs = test_dram_read(device, cq, program_run_ns, 1);
+    double dram_gbs = test_dram_read(device, cq, program_run_ns);
     std::cout << "  DRAM read bandwidth (1 core): " << dram_gbs << " GB/s" << std::endl;
-    double dram_gbs_all = test_dram_read(device, cq, program_run_ns, n_cores);
+    double dram_gbs_all = test_dram_read(device, cq, program_run_ns, all_cores);
     std::cout << "  DRAM read bandwidth (all cores): " << dram_gbs_all << " GB/s" << std::endl;
     double adjacent_write = test_noc_bandwidth(device, cq, program_run_ns, false);
     std::cout << "  Adjacent core NoC write: " << adjacent_write << " GB/s" << std::endl;
@@ -447,9 +458,13 @@ int main(int argc, char **argv)
     std::cout << "\n";
     std::cout << "Compute: " << std::endl;
     double matmul_gflops = test_matmul(device, cq, program_run_ns);
-    std::cout << "  Per core matrix multiplcation (BFP16): " << matmul_gflops << " GLFLOPS" << std::endl;
+    std::cout << "  Matrix multiplcation (BFP16, 1 core): " << pretty_gflops(matmul_gflops) << std::endl;
+    double matmul_gflops_all = test_matmul(device, cq, program_run_ns, all_cores);
+    std::cout << "  Matrix multiplcation (BFP16, all cores): " << pretty_gflops(matmul_gflops_all) << std::endl;
     double element_wise_gflops = test_element_wise(device, cq, program_run_ns);
-    std::cout << "  Per core element wise (BFP16): " << element_wise_gflops << " GLFLOPS" << std::endl;
+    std::cout << "  Element wise math (BFP16, 1 core): " << pretty_gflops(element_wise_gflops) << std::endl;
+    double element_wise_gflops_all = test_element_wise(device, cq, program_run_ns, all_cores);
+    std::cout << "  Element wise math (BFP16, all cores): " << pretty_gflops(element_wise_gflops_all) << std::endl;
 
     std::cout << "\n";
     auto [download_gbs, upload_gbs] = test_data_transfer(device, cq);
