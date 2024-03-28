@@ -9,6 +9,7 @@
 #include "common/bfloat16.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <ios>
 #include <memory>
 #include <chrono>
 #include <sstream>
@@ -479,12 +480,15 @@ int main(int argc, char **argv)
 
     Device *device = CreateDevice(device_id);
     print_device_info(device);
+    device->enable_program_cache();
 
     CommandQueue& cq = device->command_queue();
     auto core_grid = device->compute_with_storage_grid_size();
     auto all_cores = CoreRange(CoreCoord{0, 0}, CoreCoord{core_grid.x-1, core_grid.y-1});
 
     std::cout << "Bandwidth (GB/s):" << std::endl;
+    std::streamsize ss = std::cout.precision();
+    std::cout << std::fixed << std::setprecision(2);
     size_t program_run_ns = test_program_run_latency(device, cq);
     double dram_gbs = test_dram_read(device, cq, program_run_ns);
     std::cout << "  DRAM read bandwidth (1 core)     : " << dram_gbs << std::endl;
@@ -499,14 +503,14 @@ int main(int argc, char **argv)
 
     std::cout << "\n";
     std::cout << "Compute (BFP16, GFLOPS): " << std::endl;
-    double matmul_gflops = test_matmul(device, cq, program_run_ns);
-    std::cout << "  Matrix multiplcation (1 core)    : " << matmul_gflops << std::endl;
-    double matmul_gflops_all = test_matmul(device, cq, program_run_ns, all_cores);
-    std::cout << "  Matrix multiplcation (all cores) : " << matmul_gflops_all << std::endl;
     double element_wise_gflops = test_element_wise(device, cq, program_run_ns);
     std::cout << "  Element wise math (1 core)       : " << element_wise_gflops << std::endl;
     double element_wise_gflops_all = test_element_wise(device, cq, program_run_ns, all_cores);
     std::cout << "  Element wise math (all cores)    : " << element_wise_gflops_all << std::endl;
+    double matmul_gflops = test_matmul(device, cq, program_run_ns);
+    std::cout << "  Matrix multiplcation (1 core)    : " << matmul_gflops << std::endl;
+    double matmul_gflops_all = test_matmul(device, cq, program_run_ns, all_cores);
+    std::cout << "  Matrix multiplcation (all cores) : " << matmul_gflops_all << std::endl;
 
     std::cout << "\n";
     auto [download_gbs, upload_gbs] = test_data_transfer(device, cq);
@@ -516,6 +520,7 @@ int main(int argc, char **argv)
     
     std::cout << "\n";
     std::cout << "Empty program launch latency: " << program_run_ns << " ns" << std::endl;
+    std::cout << std::setprecision(ss);
     CloseDevice(device);
 
     return 0;

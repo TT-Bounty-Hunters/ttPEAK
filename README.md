@@ -35,7 +35,7 @@ To run
 ➜ ./ttpeak 
                   Metal | INFO     | Initializing device 0
                  Device | INFO     | Opening user mode device driver
-2024-03-28 08:47:29.836 | INFO     | SiliconDriver   - Detected 1 PCI device : {0}
+2024-03-28 08:52:16.488 | INFO     | SiliconDriver   - Detected 1 PCI device : {0}
                   Metal | INFO     | AI CLK for device 0 is:   1300 MHz
 Device info:
   Architecture                    : GRAYSKULL
@@ -51,23 +51,23 @@ Device info:
   Machine epsilon                 : 0.00195312
 
 Bandwidth (GB/s):
-  DRAM read bandwidth (1 core)     : 24.2766
-  DRAM read bandwidth (all cores)  : 67.2764
-  Adjacent core NoC write          : 38.1825
-  Adjacent core NoC read           : 38.4963
-  SRAM scalar r/w (per core)       : 0.980124 (this is expected to be slow)
+  DRAM read bandwidth (1 core)     : 22.99
+  DRAM read bandwidth (all cores)  : 67.45
+  Adjacent core NoC write          : 38.15
+  Adjacent core NoC read           : 38.47
+  SRAM scalar r/w (per core)       : 0.98 (this is expected to be slow)
 
 Compute (BFP16, GFLOPS): 
-  Matrix multiplcation (1 core)    : 943.583
-  Matrix multiplcation (all cores) : 79188
-  Element wise math (1 core)       : 98.0736
-  Element wise math (all cores)    : 8215.74
+  Element wise math (1 core)       : 113.32
+  Element wise math (all cores)    : 7926.89
+  Matrix multiplcation (1 core)    : 940.12
+  Matrix multiplcation (all cores) : 64805.11
 
 Transfer bandwidth (GB/s):
-  Download          : 2.60739
-  Upload            : 1.12218
+  Download          : 2.77
+  Upload            : 1.13
 
-Empty program launch latency: 64043 ns
+Empty program launch latency: 63793 ns
                   Metal | INFO     | Closing device 0
                  Device | INFO     | Closing user mode device drivers
 ```
