@@ -225,7 +225,7 @@ double test_noc_bandwidth(Device* device, CommandQueue& cq, long program_latency
     return bandwidth_gbs;
 }
 
-double test_matmul(Device* device, CommandQueue& cq, long program_latency, size_t n_cores)
+double test_matmul(Device* device, CommandQueue& cq, long program_latency)
 {
     Program program = CreateProgram();
     constexpr CoreCoord core = {0, 0};
@@ -271,6 +271,57 @@ double test_matmul(Device* device, CommandQueue& cq, long program_latency, size_
     auto real_duration = geometric_mean(runtimes) - program_latency;
 
     const size_t matmul_flop = n_tiles * 32 * 32 * (2 * 32 - 1);
+    double gflops = (double)matmul_flop / (real_duration - program_latency);
+    
+    return gflops;
+}
+
+double test_element_wise(Device* device, CommandQueue& cq, long program_latency)
+{
+    Program program = CreateProgram();
+    constexpr CoreCoord core = {0, 0};
+    KernelHandle movement = CreateKernel(
+        program,
+        "ttpeak_kernels/movement/generate_dummy_interleaved.cpp",
+        core,
+        DataMovementConfig{.processor = DataMovementProcessor::RISCV_0, .noc = NOC::RISCV_0_default}
+    );
+    KernelHandle compute = CreateKernel(
+        program,
+        "ttpeak_kernels/compute/element_wise.cpp",
+        core,
+        ComputeConfig{
+            .math_approx_mode = false,
+            .compile_args = {},
+            .defines = {}
+        }
+    );
+
+    constexpr uint32_t n_tiles = 2048; // needs to be a multiple of 8
+    constexpr uint32_t cb_tiles = 16; // needs to be a multiple of 8
+    CBHandle cb0 = MakeCircularBufferBFP16(program, core, tt::CB::c_in0, cb_tiles);
+    CBHandle cb1 = MakeCircularBufferBFP16(program, core, tt::CB::c_in1, cb_tiles);
+    CBHandle cb_out = MakeCircularBufferBFP16(program, core, tt::CB::c_out0, cb_tiles);
+
+    SetRuntimeArgs(program, movement, core, {n_tiles});
+    SetRuntimeArgs(program, compute, core, {n_tiles});
+
+    EnqueueProgram(cq, program, false);
+    Finish(cq);
+
+    std::vector<double> runtimes;
+    for(size_t i = 0; i < experiment_runs; i++)
+    {
+        auto t1 = high_resolution_clock::now();
+        EnqueueProgram(cq, program, false);
+        Finish(cq);
+        auto t2 = high_resolution_clock::now();
+        auto duration = duration_cast<nanoseconds>(t2 - t1).count();
+        runtimes.push_back(duration);
+    }
+    auto real_duration = geometric_mean(runtimes) - program_latency;
+
+    const size_t matmul_flop = n_tiles * 32 * 32;
     double gflops = (double)matmul_flop / (real_duration - program_latency);
     
     return gflops;
@@ -395,8 +446,10 @@ int main(int argc, char **argv)
 
     std::cout << "\n";
     std::cout << "Compute: " << std::endl;
-    double matmul_gflops = test_matmul(device, cq, program_run_ns, n_cores);
-    std::cout << "  Per core matrix multiplcation (BFP16): " << matmul_gflops << " GLFLOPS/core" << std::endl;
+    double matmul_gflops = test_matmul(device, cq, program_run_ns);
+    std::cout << "  Per core matrix multiplcation (BFP16): " << matmul_gflops << " GLFLOPS" << std::endl;
+    double element_wise_gflops = test_element_wise(device, cq, program_run_ns);
+    std::cout << "  Per core element wise (BFP16): " << element_wise_gflops << " GLFLOPS" << std::endl;
 
     std::cout << "\n";
     auto [download_gbs, upload_gbs] = test_data_transfer(device, cq);
