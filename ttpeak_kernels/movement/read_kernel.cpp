@@ -6,9 +6,7 @@ void kernel_main()
     std::uint32_t l1_size        = get_arg_val<uint32_t>(1);
 
     std::uint32_t dram_addr      = get_arg_val<uint32_t>(2);
-    std::uint32_t dram_noc_x     = get_arg_val<uint32_t>(3);
-    std::uint32_t dram_noc_y     = get_arg_val<uint32_t>(4);
-    std::uint32_t dram_size      = get_arg_val<uint32_t>(5);
+    std::uint32_t dram_size      = get_arg_val<uint32_t>(3);
 
     if(l1_size == 0)
         return;

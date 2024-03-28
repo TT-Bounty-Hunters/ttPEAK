@@ -144,8 +144,6 @@ double test_dram_read(Device* device, CommandQueue& cq, long program_latency, Co
         l1_buffer->address(),
         l1_buffer->size(),
         dram_buffer->address(),
-        (uint32_t) dram_buffer->noc_coordinates().x,
-        (uint32_t) dram_buffer->noc_coordinates().y,
         dram_buffer->size(),
     };
 
