@@ -373,17 +373,17 @@ void print_device_info(Device* device)
     CoreCoord core_grid = device->logical_grid_size();
     CoreCoord compute_with_storage_grid_size = device->compute_with_storage_grid_size();
     std::cout << "Device info:\n"
-        << "  Architecture: " << arch2name(device->arch()) << "\n"
-        << "  Device ID: " << device->id() << "\n"
-        << "  # of hardware command queues: " << (int)device->num_hw_cqs() << "\n"
-        << "  L1 memory per core: " << device->l1_size_per_core() / 1024 << " KiB\n"
-        << "  Logical core grid size: " << core_grid.x << "x" << core_grid.y << "\n"
-        << "  Compute with storage grid size: " << compute_with_storage_grid_size.x << "x" << compute_with_storage_grid_size.y << "\n"
-        << "  DRAM banks: " << device->num_banks(BufferType::DRAM) << "\n"
-        << "  DRAM bank size: " << device->bank_size(BufferType::DRAM) / 1024 / 1024 << " MiB\n"
-        << "  DRAM channels: " << device->num_dram_channels() << "\n"
-        << "  DRAM size per channel: " << device->dram_size_per_channel() / 1024 / 1024 << " MiB\n"
-        << "  Machine epsilon: " << device->sfpu_eps() << "\n"
+        << "  Architecture                    : " << arch2name(device->arch()) << "\n"
+        << "  Device ID                       : " << device->id() << "\n"
+        << "  # of hardware command queues    : " << (int)device->num_hw_cqs() << "\n"
+        << "  L1 memory per core              : " << device->l1_size_per_core() / 1024 << " KiB\n"
+        << "  Logical core grid size          : " << core_grid.x << "x" << core_grid.y << "\n"
+        << "  Compute with storage grid size  : " << compute_with_storage_grid_size.x << "x" << compute_with_storage_grid_size.y << "\n"
+        << "  DRAM banks                      : " << device->num_banks(BufferType::DRAM) << "\n"
+        << "  DRAM bank size                  : " << device->bank_size(BufferType::DRAM) / 1024 / 1024 << " MiB\n"
+        << "  DRAM channels                   : " << device->num_dram_channels() << "\n"
+        << "  DRAM size per channel           : " << device->dram_size_per_channel() / 1024 / 1024 << " MiB\n"
+        << "  Machine epsilon                 : " << device->sfpu_eps() << "\n"
         << std::endl;
 }
 
@@ -444,36 +444,36 @@ int main(int argc, char **argv)
     auto core_grid = device->compute_with_storage_grid_size();
     auto all_cores = CoreRange(CoreCoord{0, 0}, CoreCoord{core_grid.x-1, core_grid.y-1});
 
-    std::cout << "Bandwidth:" << std::endl;
+    std::cout << "Bandwidth (GB/s):" << std::endl;
     size_t program_run_ns = test_program_run_latency(device, cq);
     double dram_gbs = test_dram_read(device, cq, program_run_ns);
-    std::cout << "  DRAM read bandwidth (1 core): " << dram_gbs << " GB/s" << std::endl;
+    std::cout << "  DRAM read bandwidth (1 core)     : " << dram_gbs << std::endl;
     double dram_gbs_all = test_dram_read(device, cq, program_run_ns, all_cores);
-    std::cout << "  DRAM read bandwidth (all cores): " << dram_gbs_all << " GB/s" << std::endl;
+    std::cout << "  DRAM read bandwidth (all cores)  : " << dram_gbs_all  << std::endl;
     double adjacent_write = test_noc_bandwidth(device, cq, program_run_ns, false);
-    std::cout << "  Adjacent core NoC write: " << adjacent_write << " GB/s" << std::endl;
+    std::cout << "  Adjacent core NoC write          : " << adjacent_write << std::endl;
     double adjacent_read = test_noc_bandwidth(device, cq, program_run_ns, true);
-    std::cout << "  Adjacent core NoC read: " << adjacent_read << " GB/s" << std::endl;
+    std::cout << "  Adjacent core NoC read           : " << adjacent_read  << std::endl;
 
     std::cout << "\n";
-    std::cout << "Compute: " << std::endl;
+    std::cout << "Compute (BFP16, GFLOPS): " << std::endl;
     double matmul_gflops = test_matmul(device, cq, program_run_ns);
-    std::cout << "  Matrix multiplcation (BFP16, 1 core): " << pretty_gflops(matmul_gflops) << std::endl;
+    std::cout << "  Matrix multiplcation (1 core)    : " << matmul_gflops << std::endl;
     double matmul_gflops_all = test_matmul(device, cq, program_run_ns, all_cores);
-    std::cout << "  Matrix multiplcation (BFP16, all cores): " << pretty_gflops(matmul_gflops_all) << std::endl;
+    std::cout << "  Matrix multiplcation (all cores) : " << matmul_gflops_all << std::endl;
     double element_wise_gflops = test_element_wise(device, cq, program_run_ns);
-    std::cout << "  Element wise math (BFP16, 1 core): " << pretty_gflops(element_wise_gflops) << std::endl;
+    std::cout << "  Element wise math (1 core)       : " << element_wise_gflops << std::endl;
     double element_wise_gflops_all = test_element_wise(device, cq, program_run_ns, all_cores);
-    std::cout << "  Element wise math (BFP16, all cores): " << pretty_gflops(element_wise_gflops_all) << std::endl;
+    std::cout << "  Element wise math (all cores)    : " << element_wise_gflops_all << std::endl;
 
     std::cout << "\n";
     auto [download_gbs, upload_gbs] = test_data_transfer(device, cq);
-    std::cout << "Transfer bandwidth:\n"
-        << "  Download: " << download_gbs << " GB/s\n"
-        << "  Upload: " << upload_gbs << " GB/s\n";
+    std::cout << "Transfer bandwidth (GB/s):\n"
+        << "  Download          : " << download_gbs << "\n"
+        << "  Upload            : " << upload_gbs << "\n";
     
     std::cout << "\n";
-    std::cout << "Empty program latency: " << 0 << " ns" << std::endl;
+    std::cout << "Empty program launch latency: " << program_run_ns << " ns" << std::endl;
     CloseDevice(device);
 
     return 0;
