@@ -35,30 +35,39 @@ To run
 ➜ ./ttpeak 
                   Metal | INFO     | Initializing device 0
                  Device | INFO     | Opening user mode device driver
-2024-03-25 04:26:51.495 | INFO     | SiliconDriver   - Detected 1 PCI device : [0]
+2024-03-28 08:47:29.836 | INFO     | SiliconDriver   - Detected 1 PCI device : {0}
                   Metal | INFO     | AI CLK for device 0 is:   1300 MHz
 Device info:
-  Architecture: GRAYSKULL
-  Device ID: 0
-  # of hardware command queues: 1
-  L1 memory per core: 1024 KiB
-  Logical core grid size: 12x8
-  DRAM banks: 8
-  DRAM bank size: 1023 MiB
-  DRAM channels: 8
-  DRAM size per channel: 1024 MiB
-  Machine epsilon: 0.00195312
+  Architecture                    : GRAYSKULL
+  Device ID                       : 0
+  # of hardware command queues    : 1
+  L1 memory per core              : 1024 KiB
+  Logical core grid size          : 12x8
+  Compute with storage grid size  : 11x8
+  DRAM banks                      : 8
+  DRAM bank size                  : 1023 MiB
+  DRAM channels                   : 8
+  DRAM size per channel           : 1024 MiB
+  Machine epsilon                 : 0.00195312
 
-DRAM Bandwidth:
-  DRAM read bandwidth (1 core): 15.4251 GB/s
-  DRAM read bandwidth (8 cores): 12.0695 GB/s
-Compute: 
-  Elementwise operation: 5.49921 GLFLOPS
+Bandwidth (GB/s):
+  DRAM read bandwidth (1 core)     : 24.2766
+  DRAM read bandwidth (all cores)  : 67.2764
+  Adjacent core NoC write          : 38.1825
+  Adjacent core NoC read           : 38.4963
+  SRAM scalar r/w (per core)       : 0.980124 (this is expected to be slow)
 
-Transfer bandwidth:
-  Download: 3.3803 GB/s
-  Upload: 1.13151 GB/s
+Compute (BFP16, GFLOPS): 
+  Matrix multiplcation (1 core)    : 943.583
+  Matrix multiplcation (all cores) : 79188
+  Element wise math (1 core)       : 98.0736
+  Element wise math (all cores)    : 8215.74
 
-Empty program latency: 64311 ns
+Transfer bandwidth (GB/s):
+  Download          : 2.60739
+  Upload            : 1.12218
+
+Empty program launch latency: 64043 ns
                   Metal | INFO     | Closing device 0
+                 Device | INFO     | Closing user mode device drivers
 ```

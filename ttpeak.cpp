@@ -54,8 +54,6 @@ double geometric_mean(const std::vector<double>& data)
     return std::pow( std::numeric_limits<double>::radix,ex * invN ) * m;
 }
 
-
-
 std::shared_ptr<Buffer> MakeBuffer(Device *device, uint32_t size, uint32_t page_size, bool sram)
 {
     InterleavedBufferConfig config{
@@ -241,8 +239,8 @@ double test_matmul(Device* device, CommandQueue& cq, long program_latency, CoreR
         }
     );
 
-    constexpr uint32_t n_tiles = 2048;
-    constexpr uint32_t cb_tiles = 2;
+    constexpr uint32_t n_tiles = 2048; // Must be a multiple of 8
+    constexpr uint32_t cb_tiles = 16; // Must be a multiple of 8
     CBHandle cb0 = MakeCircularBufferBFP16(program, core, tt::CB::c_in0, cb_tiles);
     CBHandle cb1 = MakeCircularBufferBFP16(program, core, tt::CB::c_in1, cb_tiles);
     CBHandle cb_out = MakeCircularBufferBFP16(program, core, tt::CB::c_out0, cb_tiles);
@@ -321,6 +319,48 @@ double test_element_wise(Device* device, CommandQueue& cq, long program_latency,
     double gflops = (double)matmul_flop / (real_duration - program_latency);
     
     return gflops;
+}
+
+double test_sram_scalar_bandwidth(Device* device, CommandQueue& cq, long program_latency, CoreRange core = CoreCoord{0, 0})
+{
+    Program program = CreateProgram();
+
+    CBHandle cb0 = MakeCircularBufferBFP16(program, core, tt::CB::c_in0, 8);
+    const size_t data_size = 8 * 2 * 32 * 32;
+
+    KernelHandle kernel = CreateKernel(
+        program,
+        "ttpeak_kernels/movement/memset_sram.cpp",
+        core,
+        DataMovementConfig{.processor = DataMovementProcessor::RISCV_0, .noc = NOC::RISCV_0_default}
+    );
+
+    constexpr uint32_t n_runs = 128;
+
+    const std::vector<uint32_t> runtime_args = {
+        n_runs
+    };
+
+    SetRuntimeArgs(program, kernel, core, runtime_args);
+
+    EnqueueProgram(cq, program, false);
+    Finish(cq);
+
+    std::vector<double> runtimes;
+    for(size_t i = 0; i < experiment_runs; i++)
+    {
+        auto t1 = high_resolution_clock::now();
+        EnqueueProgram(cq, program, false);
+        Finish(cq);
+        auto t2 = high_resolution_clock::now();
+        auto duration = duration_cast<nanoseconds>(t2 - t1).count();
+        runtimes.push_back(duration);
+    }
+
+    auto real_duration = geometric_mean(runtimes) - program_latency;
+    double bandwidth_gbs = (double)data_size * n_runs / real_duration * core.size();
+
+    return bandwidth_gbs;
 }
 
 std::pair<double, double> test_data_transfer(Device* device, CommandQueue& cq)
@@ -454,6 +494,8 @@ int main(int argc, char **argv)
     std::cout << "  Adjacent core NoC write          : " << adjacent_write << std::endl;
     double adjacent_read = test_noc_bandwidth(device, cq, program_run_ns, true);
     std::cout << "  Adjacent core NoC read           : " << adjacent_read  << std::endl;
+    double sram_scalar_gbs = test_sram_scalar_bandwidth(device, cq, program_run_ns);
+    std::cout << "  SRAM scalar r/w (per core)       : " << sram_scalar_gbs << " (this is expected to be slow)" << std::endl;
 
     std::cout << "\n";
     std::cout << "Compute (BFP16, GFLOPS): " << std::endl;
