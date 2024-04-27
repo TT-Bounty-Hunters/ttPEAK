@@ -20,19 +20,17 @@ Then build the project
 
 ```bash
 cd ttPEAK
-# HACK: Metalium only searches kernels under it's directories
-ln -s ttpeak_kernels $TT_METAL_HOME/ttpeak_kernels
-
 mkdir build
 cd build
 cmake ..
 make
 ```
 
-To run
+To run the program (the output is from my system with a Grayskull e75 on x4 PCIe Gen4)
 
 ```
-➜ ./ttpeak 
+➜ cd .. # Move to the root of the project. NOT the build directory
+➜ build/ttpeak 
                   Metal | INFO     | Initializing device 0
                  Device | INFO     | Opening user mode device driver
 2024-03-28 08:52:16.488 | INFO     | SiliconDriver   - Detected 1 PCI device : {0}
