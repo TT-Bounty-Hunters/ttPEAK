@@ -12,7 +12,6 @@ Before building this project. Setup the enviroment variables that Metalium needs
 ```bash
 export ARCH_NAME=grayskull                                                                   
 export TT_METAL_HOME=/path/to/your/root/of/tt-metal/
-export PYTHONPATH=$TT_METAL_HOME
 export TT_METAL_ENV=dev
 ```
 
