@@ -24,6 +24,8 @@ cd build
 # Current tt-metal uses clang and libc++
 cmake . -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_FLAGS="-stdlib=libc++" -DCMAKE_EXE_LINKER_FLAGS="-lc++abi -lc++"
 make
+# Link the kernel directory. see bug https://github.com/tenstorrent/tt-metal/issues/9470
+ln -s `pwd`/../ttpeak_kernels $TT_METAL_HOME/ttpeak_kernels
 ```
 
 To run the program (the output is from my system with a Grayskull e75 on x4 PCIe Gen4)
