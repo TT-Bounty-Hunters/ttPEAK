@@ -21,7 +21,8 @@ Then build the project
 cd ttPEAK
 mkdir build
 cd build
-cmake ..
+# Current tt-metal uses clang and libc++
+cmake . -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_FLAGS="-stdlib=libc++" -DCMAKE_EXE_LINKER_FLAGS="-lc++abi -lc++"
 make
 ```
 

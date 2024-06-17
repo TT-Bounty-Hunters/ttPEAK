@@ -18,17 +18,21 @@ target_include_directories(ttpeak PRIVATE
     $ENV{TT_METAL_HOME}
     $ENV{TT_METAL_HOME}/tt_metal
     $ENV{TT_METAL_HOME}/tt_metal/third_party/umd
+    $ENV{TT_METAL_HOME}/tt_metal/third_party/fmt
     $ENV{TT_METAL_HOME}/tt_metal/hw/inc/$ENV{ARCH_NAME}
     $ENV{TT_METAL_HOME}/tt_metal/hw/inc/
     $ENV{TT_METAL_HOME}/tt_metal/third_party/umd/src/firmware/riscv/$ENV{ARCH_NAME}
 )
 target_link_directories(ttpeak PRIVATE
-    $ENV{TT_METAL_HOME}/build/lib
+    $ENV{TT_METAL_HOME}/build/tt_metal
 )
 target_link_libraries(ttpeak PRIVATE
     tt_metal
     yaml-cpp
-    fmt
+)
+
+target_compile_definitions(ttpeak PRIVATE
+    FMT_HEADER_ONLY
 )
 
 target_precompile_headers(ttpeak PRIVATE pch.hpp)
